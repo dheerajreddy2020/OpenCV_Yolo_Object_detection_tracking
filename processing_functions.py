@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 def postprocess(frame, outs):  
     height,width,channels = frame.shape
     classIds = []
