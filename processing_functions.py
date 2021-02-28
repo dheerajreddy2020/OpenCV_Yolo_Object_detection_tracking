@@ -63,7 +63,7 @@ def drawPred(frame, classId, conf, left, top, right, bottom, classes):
         cv2.putText(frame, label, (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255))
     return frame
 
-def display_count(frame, count_classes):
+def display_count(frame, height, width, count_classes):
   count_north,count_south = count_classes
   i = 3
   cv2.putText(frame, 'North Direction',(5, 10+i*5), cv2.FONT_HERSHEY_SIMPLEX, 1e-3 * height, (255,128,0), 2)
@@ -108,18 +108,19 @@ def track_bbox(boxes_previous,box, confidence, predicted_class,k,count_classes):
     for i in range(len(boxes_previous)):
       bbox_previous, prev_proba, prev_class = boxes_previous[i]
       iou_calc = bbox_iou(box, bbox_previous)
-      if iou_calc > 0.4:
+      if iou_calc > 0.3:
         if predicted_class != prev_class :
           count = None
           count = count_south if box[0] > 320 else count_north
-          if predicted_class in count.keys(): count[predicted_class] += 1
-          count[prev_class] -= 1
+          if predicted_class in count.keys(): 
+            count[predicted_class] += 1
+            count[prev_class] -= 1
         add = 0
     if add == 1:
       count = None
       count = count_south if box[0] > 320 else count_north
       if predicted_class in count.keys(): count[predicted_class] += 1
-	return [count_north,count_south]
+    return [count_north,count_south]
 	  
 def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, classes, mask =False, count_classes=False):
   height,width,channels = frames[0].shape
@@ -134,46 +135,41 @@ def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, classes,
     confidences = []
     boxes = []
     for out in outs:
-        for detection in out[k]:
-            scores = detection[5:]
-            classId = np.argmax(scores)
-            confidence = scores[classId]
-            if confidence > confThreshold:
-                x_c = int(detection[0] * width)
-                y_c = int(detection[1] * height)
-                w = int(detection[2] * width)
-                h = int(detection[3] * height)
-                x = int(x_c - w / 2)
-                y = int(y_c - h / 2)
-                classIds.append(classId)
-                confidences.append(float(confidence))
-                boxes.append([x, y, w, h])
+      for detection in out[k]:
+        scores = detection[5:]
+        classId = np.argmax(scores)
+        confidence = scores[classId]
+        if confidence > confThreshold:
+          x_c = int(detection[0] * width)
+          y_c = int(detection[1] * height)
+          w = int(detection[2] * width)
+          h = int(detection[3] * height)
+          x = int(x_c - w / 2)
+          y = int(y_c - h / 2)
+          classIds.append(classId)
+          confidences.append(float(confidence))
+          boxes.append([x, y, w, h])
 
     # Perform non maximum suppression to eliminate redundant overlapping boxes with
     # lower confidences.
     indices = cv2.dnn.NMSBoxes(boxes, confidences, confThreshold, nmsThreshold)
     for i in indices:
-        i = i[0]
-        x,y,w,h = boxes[i]
-        #print(boxes[i])
-        if mask :
-          if w/h < 2 and w/h > 0.5:
-            acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
-			if count_classes:
-				count_classes = track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k, count_classes)
-            frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
-        else:
+      i = i[0]
+      x,y,w,h = boxes[i]
+      #print(boxes[i])
+      if mask:
+        if w/h < 2 and w/h > 0.5:
           acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
-		  if count_classes :
-		    count_classes = track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k, count_classes)
+          count_classes = track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k, count_classes)
           frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
+      else:
+        frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
     prev_boxes = acc_boxes
     acc_boxes = []
     if count_classes:
-      frame = display_count(frame, height, width)
+      frame = display_count(frame, height, width, count_classes)
     output_frames.append(frame)
   return output_frames, prev_boxes, count_classes
-
 
 def yolo_predict_image(img, net):
 	inpWidth = 416       #Width of network's input image
