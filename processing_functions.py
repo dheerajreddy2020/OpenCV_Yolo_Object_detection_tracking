@@ -35,7 +35,7 @@ def postprocess(frame, outs):
         x,y,w,h = box
         if w/h < 2 and w/h > 0.5:
           frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h)
-    cv2_imshow(frame)
+	return frame
 
 
 # Get the names of the output layers
@@ -159,3 +159,15 @@ def postprocess2(frames, outs, count_classes = False):
       frame = display_count(frame)
     output_frames.append(frame)
   return output_frames
+
+def yolo_predict_image(imloc):
+	img = cv2.imread(imloc)
+	inpWidth = 416       #Width of network's input image
+	inpHeight = 416      #Height of network's input image
+	# Create a 4D blob from a frame.
+	blob = cv2.dnn.blobFromImage(img, 1/255., (inpWidth, inpHeight), [0,0,0], swapRB=True, crop=False)
+	# Sets the input to the network
+	net.setInput(blob)
+	# Runs the forward pass to get output of the output layers
+	outs = net.forward(getOutputsNames(net))
+	return outs
