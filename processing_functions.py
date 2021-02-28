@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-def postprocess(frame, outs, mask = False):  
+def postprocess(frame, outs, confThreshold,nmsThreshold, classes, mask = False):  
     height,width,channels = frame.shape
     classIds = []
     confidences = []
@@ -35,9 +35,9 @@ def postprocess(frame, outs, mask = False):
         x,y,w,h = box
         if mask :
           if w/h < 2 and w/h > 0.5:
-            frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h)
+            frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h, classes)
         else:
-          frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h)
+          frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h, classes)
     return frame
 
 
@@ -49,7 +49,7 @@ def getOutputsNames(net):
     # Get the names of the output layers, i.e. the layers with unconnected outputs
     return [layersNames[i[0] - 1] for i in net.getUnconnectedOutLayers()]
 
-def drawPred(frame, classId, conf, left, top, right, bottom):
+def drawPred(frame, classId, conf, left, top, right, bottom, classes):
     # Draw a bounding box.
     cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255),2)
     label = '%.2f' % conf
@@ -118,7 +118,7 @@ def track_bbox(boxes_previous,box, confidence, predicted_class,k):
       count = count_south if box[0] > 320 else count_north
       if predicted_class in count.keys(): count[predicted_class] += 1
 	  
-def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, mask =False, count_classes=False):
+def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, classes, mask =False, count_classes=False):
   height,width,channels = frames[0].shape
   output_frames = []; acc_boxes = []
   for k in range(len(frames)):  
@@ -157,11 +157,11 @@ def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, mask =Fa
           if w/h < 2 and w/h > 0.5:
             acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
             track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
-            frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h)
+            frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
         else:
           acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
           track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
-          frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h)
+          frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
     prev_boxes = acc_boxes
     acc_boxes = []
     if count_classes:
