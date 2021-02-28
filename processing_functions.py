@@ -63,7 +63,8 @@ def drawPred(frame, classId, conf, left, top, right, bottom, classes):
         cv2.putText(frame, label, (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255))
     return frame
 
-def display_count(frame):
+def display_count(frame, count_classes):
+  count_north,count_south = count_classes
   i = 3
   cv2.putText(frame, 'North Direction',(5, 10+i*5), cv2.FONT_HERSHEY_SIMPLEX, 1e-3 * height, (255,128,0), 2)
   for key,value in count_north.items():
@@ -101,7 +102,8 @@ def bbox_iou(box1, box2):
 	union = w1*h1 + w2*h2 - intersect
 	return float(intersect) / union
 
-def track_bbox(boxes_previous,box, confidence, predicted_class,k):
+def track_bbox(boxes_previous,box, confidence, predicted_class,k,count_classes):
+    count_north, count_south = count_classes
     add = 1
     for i in range(len(boxes_previous)):
       bbox_previous, prev_proba, prev_class = boxes_previous[i]
@@ -117,6 +119,7 @@ def track_bbox(boxes_previous,box, confidence, predicted_class,k):
       count = None
       count = count_south if box[0] > 320 else count_north
       if predicted_class in count.keys(): count[predicted_class] += 1
+	return [count_north,count_south]
 	  
 def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, classes, mask =False, count_classes=False):
   height,width,channels = frames[0].shape
@@ -156,18 +159,20 @@ def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, classes,
         if mask :
           if w/h < 2 and w/h > 0.5:
             acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
-            track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
+			if count_classes:
+				count_classes = track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k, count_classes)
             frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
         else:
           acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
-          track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
+		  if count_classes :
+		    count_classes = track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k, count_classes)
           frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h, classes)
     prev_boxes = acc_boxes
     acc_boxes = []
     if count_classes:
       frame = display_count(frame, height, width)
     output_frames.append(frame)
-  return output_frames, prev_boxes
+  return output_frames, prev_boxes, count_classes
 
 
 def yolo_predict_image(img, net):
@@ -195,7 +200,7 @@ def yolo_init():
 	net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
 	return net,classes
 
-def images_array(fname,time_in_mins=1, mask =False):
+def images_array(fname,time_in_mins=1,skip=1, mask =False):
   ''' fname : file name in the working directory or the file path
       time_in_mins : video length to be considered for prediction
       mask : masking feature to predict in only a specific region of image
@@ -207,12 +212,12 @@ def images_array(fname,time_in_mins=1, mask =False):
   fps = round(cap.get(cv2.CAP_PROP_FPS))
   f_no = fps*60*time_in_mins
   f_no = int(f_no) if f_no < Total_frames else int(Total_frames)
-  for i in range(f_no):
+  for i in range(0,f_no, skip):
     cap.set(1, i)
     ret, frame = cap.read()
     frames.append(frame)
     if mask:
-      img = mask_image(frame)
+      img = mask_image(frame,mask)
       imgs.append(img)
     else:
       img = frame
@@ -221,7 +226,7 @@ def images_array(fname,time_in_mins=1, mask =False):
   imgs = np.array(imgs)
   return imgs,frames
 
-def predict_video(imgs,batch_size = 32):
+def predict_video(imgs,net,batch_size = 32):
   out_batches = []
   batches = len(imgs)//batch_size
   rem = len(imgs) % batch_size
@@ -238,7 +243,10 @@ def predict_video(imgs,batch_size = 32):
     out_batches.append(outs)
   return out_batches, batches, rem
 
-def output_frames(frames, out_batches, batch_size, batches, rem, confThreshold = 0.4, nmsThreshold = 0.4 ):
+def output_frames(frames, out_batches, batch_size, batches, rem, classes, count_classes = False, confThreshold = 0.4, nmsThreshold = 0.4 ):
+  count_north = {'car':0, 'bus': 0, 'truck': 0}
+  count_south = {'car':0, 'bus': 0, 'truck': 0}
+  count_classes = [count_north, count_south]
   prev_boxes = []
   out_frame_batches = []
   for i in range(batches+1):
@@ -247,7 +255,7 @@ def output_frames(frames, out_batches, batch_size, batches, rem, confThreshold =
     else:
       frame_batch = frames[batch_size*(i):batch_size*(i)+rem]
     outs = out_batches[i]
-    output_frames, prev_boxes = postprocess2(frame_batch, outs, confThreshold, nmsThreshold, prev_boxes, count_classes=True)
+    output_frames, prev_boxes, count_classes = postprocess2(frame_batch, outs, confThreshold, nmsThreshold, prev_boxes,classes,mask=True, count_classes=count_classes)
     out_frame_batches.append(output_frames)
   return out_frame_batches
 
@@ -259,3 +267,12 @@ def create_video(out_frame_batches,video_loc,fps):
     for i in range(len(output_frames)):
       out.write(output_frames[i])
   out.release()
+
+def mask_image(img,refPt):
+    pts = np.array(refPt)
+    pts = pts*2
+    #print(pts)
+    mask = np.zeros(img.shape[:2], np.uint8)
+    cv2.drawContours(mask, [pts], -1, (255, 255, 255), -1, cv2.LINE_AA)
+    dst = cv2.bitwise_and(img, img, mask=mask)
+    return dst
