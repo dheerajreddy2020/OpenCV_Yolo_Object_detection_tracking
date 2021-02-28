@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-def postprocess(frame, outs):  
+def postprocess(frame, outs, mask = False):  
     height,width,channels = frame.shape
     classIds = []
     confidences = []
@@ -33,9 +33,13 @@ def postprocess(frame, outs):
         i = i[0]
         box = boxes[i]
         x,y,w,h = box
-        if w/h < 2 and w/h > 0.5:
+        if mask :
+          if w/h < 2 and w/h > 0.5:
+            frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h)
+        else:
           frame = drawPred(frame, classIds[i], confidences[i], x, y, x+w, y+h)
-	return frame
+    return frame
+
 
 
 # Get the names of the output layers
@@ -114,9 +118,9 @@ def track_bbox(boxes_previous,box, confidence, predicted_class,k):
       count = count_south if box[0] > 320 else count_north
       if predicted_class in count.keys(): count[predicted_class] += 1
 	  
-def postprocess2(frames, outs, count_classes = False):
-  output_frames = []
-  acc_boxes = []; prev_boxes = []
+def postprocess2(frames, outs, confThreshold, nmsThreshold, prev_boxes, mask =False, count_classes=False):
+  height,width,channels = frames[0].shape
+  output_frames = []; acc_boxes = []
   for k in range(len(frames)):  
     classIds = []
     confidences = []
@@ -149,19 +153,24 @@ def postprocess2(frames, outs, count_classes = False):
         i = i[0]
         x,y,w,h = boxes[i]
         #print(boxes[i])
-        if w/h < 2 and w/h > 0.5:
+        if mask :
+          if w/h < 2 and w/h > 0.5:
+            acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
+            track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
+            frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h)
+        else:
           acc_boxes.append([boxes[i], confidences[i],classes[classIds[i]]])
           track_bbox(prev_boxes, boxes[i], confidences[i],classes[classIds[i]],k)
           frame = drawPred(frames[k],classIds[i], confidences[i], x, y, x+w, y+h)
     prev_boxes = acc_boxes
     acc_boxes = []
     if count_classes:
-      frame = display_count(frame)
+      frame = display_count(frame, height, width)
     output_frames.append(frame)
-  return output_frames
+  return output_frames, prev_boxes
 
-def yolo_predict_image(imloc):
-	img = cv2.imread(imloc)
+
+def yolo_predict_image(img, net):
 	inpWidth = 416       #Width of network's input image
 	inpHeight = 416      #Height of network's input image
 	# Create a 4D blob from a frame.
@@ -171,3 +180,82 @@ def yolo_predict_image(imloc):
 	# Runs the forward pass to get output of the output layers
 	outs = net.forward(getOutputsNames(net))
 	return outs
+	
+def yolo_init():
+	# Load names of classes
+	classesFile = "coco.names"
+	classes = None
+	with open(classesFile, 'rt') as f:
+		classes = f.read().rstrip('\n').split('\n')
+	# Give the configuration and weight files for the model and load the network using them.
+	modelConfiguration = "yolov3.cfg"
+	modelWeights = "yolov3.weights"
+	net = cv2.dnn.readNetFromDarknet(modelConfiguration, modelWeights)
+	net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+	net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+	return net,classes
+
+def images_array(fname,time_in_mins=1, mask =False):
+  ''' fname : file name in the working directory or the file path
+      time_in_mins : video length to be considered for prediction
+      mask : masking feature to predict in only a specific region of image
+  '''
+  frames = []
+  imgs = []
+  cap = cv2.VideoCapture(fname)
+  Total_frames = cap.get(7)
+  fps = round(cap.get(cv2.CAP_PROP_FPS))
+  f_no = fps*60*time_in_mins
+  f_no = int(f_no) if f_no < Total_frames else int(Total_frames)
+  for i in range(f_no):
+    cap.set(1, i)
+    ret, frame = cap.read()
+    frames.append(frame)
+    if mask:
+      img = mask_image(frame)
+      imgs.append(img)
+    else:
+      img = frame
+      imgs.append(img)
+  frames = np.array(frames)
+  imgs = np.array(imgs)
+  return imgs,frames
+
+def predict_video(imgs,batch_size = 32):
+  out_batches = []
+  batches = len(imgs)//batch_size
+  rem = len(imgs) % batch_size
+  for i in range(batches+1):
+    if i < batches :
+      img_batch = imgs[batch_size*i:batch_size*(i+1)]
+    else:
+      img_batch = imgs[batch_size*(i):batch_size*(i)+rem]
+    blob = cv2.dnn.blobFromImages(img_batch, 1/255., (416, 416), [0,0,0], swapRB=True, crop=False)
+    # Sets the input to the network
+    net.setInput(blob)
+    # Runs the forward pass to get output of the output layers
+    outs = net.forward(getOutputsNames(net))
+    out_batches.append(outs)
+  return out_batches, batches, rem
+
+def output_frames(frames, out_batches, batch_size, batches, rem, confThreshold = 0.4, nmsThreshold = 0.4 ):
+  prev_boxes = []
+  out_frame_batches = []
+  for i in range(batches+1):
+    if i < batches :
+      frame_batch = frames[batch_size*i:batch_size*(i+1)]
+    else:
+      frame_batch = frames[batch_size*(i):batch_size*(i)+rem]
+    outs = out_batches[i]
+    output_frames, prev_boxes = postprocess2(frame_batch, outs, confThreshold, nmsThreshold, prev_boxes, count_classes=True)
+    out_frame_batches.append(output_frames)
+  return out_frame_batches
+
+def create_video(out_frame_batches,video_loc,fps):
+  height, width, channels = out_frame_batches[0][0].shape
+  fourcc = cv2.VideoWriter_fourcc(*'XVID')
+  out = cv2.VideoWriter(video_loc,fourcc, fps, (width,height))
+  for output_frames in out_frame_batches:
+    for i in range(len(output_frames)):
+      out.write(output_frames[i])
+  out.release()
