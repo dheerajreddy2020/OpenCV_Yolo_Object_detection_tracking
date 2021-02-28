@@ -114,7 +114,8 @@ def track_bbox(boxes_previous,box, confidence, predicted_class,k,count_classes):
           count = count_south if box[0] > 320 else count_north
           if predicted_class in count.keys(): 
             count[predicted_class] += 1
-            count[prev_class] -= 1
+            try: count[prev_class] -= 1
+            except: count[predicted_class] -= 1
         add = 0
     if add == 1:
       count = None
