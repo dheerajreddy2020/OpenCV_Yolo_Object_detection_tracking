@@ -1,8 +1,10 @@
 ## Object detection and Tracking using YoloV3 in OpenCV
 
-* Objects are detected using YoloV3
-* Tracking is done by calculating Intersection over union of consecutive frames
-* Region of interest is chosen to detect the objects
+* OpenCV is used for video pre-processing.
+* Region of interest is chosen to detect the objects only when seen in the particular region.
+* Objects are detected by calling YoloV3 model into opencv.
+* Tracking is done by calculating Intersection over union for predicted bounding boxes of consecutive frames
+* The locations of bounding boxes are used to predict the direction of motion of vehicles
 
 ### Demo Colab link:
 
